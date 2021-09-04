@@ -26,17 +26,17 @@ function createModel() {
   const model = tf.sequential();
 
   // Add a single input layer
-  // model.add(
-  //   tf.layers.lstm({
-  //     inputShape: [INPUT_INTERVAL, 4],
-  //     units: 40,
-  //     returnSequences: false,
-  //     activation: "tanh",
-  //   })
-  // );
-  model.add(tf.layers.flatten({ inputShape: [INPUT_INTERVAL, 4] }));
+  model.add(
+    tf.layers.lstm({
+      inputShape: [INPUT_INTERVAL, 4],
+      units: 40,
+      returnSequences: false,
+      activation: "tanh",
+    })
+  );
+  // model.add(tf.layers.flatten({ inputShape: [INPUT_INTERVAL, 4] }));
 
-  // model.add(tf.layers.dense({ units: 40, activation: "sigmoid" }));
+  model.add(tf.layers.dense({ units: 40, activation: "sigmoid" }));
   model.add(tf.layers.dense({ units: 40, activation: "sigmoid" }));
   model.add(tf.layers.dense({ units: 20, activation: "sigmoid" }));
 
@@ -73,7 +73,7 @@ function convertToTensor(data) {
       }
       rawInputs.push(input);
     }
-    
+
     let rawInputsTraining = rawInputs.slice(
       0,
       rawInputs.length * TRAINING_PERCENTAGE

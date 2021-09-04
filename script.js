@@ -1,3 +1,12 @@
+const INPUT_INTERVAL = 15;
+const TRAINING_PERCENTAGE = 0.9;
+
+const LEARNING_RATE = 0.01;
+const LEARNING_RATE2 = 0.03;
+const DECAY_RATE = 0.002;
+const BATCH_SIZE = 10;
+const EPOCHS = 150;
+
 async function getData() {
   let formattedData = [];
   ohlcv.forEach((element) => {
@@ -16,31 +25,18 @@ function createModel() {
   // Create a sequential model
   const model = tf.sequential();
 
+  // Add a single input layer
   // model.add(
   //   tf.layers.lstm({
-  //     inputShape: [60, 4],
-  //     units: 12,
-  //     returnSequences: true,
-  //     activation: "tanh",
-  //   })
-  // );
-
-  // model.add(
-  //   tf.layers.lstm({
-  //     units: 12,
+  //     inputShape: [INPUT_INTERVAL, 4],
+  //     units: 40,
   //     returnSequences: false,
   //     activation: "tanh",
   //   })
   // );
+  model.add(tf.layers.flatten({ inputShape: [INPUT_INTERVAL, 4] }));
 
-  // model.add(tf.layers.dense({ units: 32, activation: "sigmoid" }));
-
-  // model.add(tf.layers.dense({ units: 1, activation: "softmax" }));
-
-  // Add a single input layer
-  model.add(tf.layers.flatten({ inputShape: [60, 4] }));
-
-  model.add(tf.layers.dense({ units: 40, activation: "sigmoid" }));
+  // model.add(tf.layers.dense({ units: 40, activation: "sigmoid" }));
   model.add(tf.layers.dense({ units: 40, activation: "sigmoid" }));
   model.add(tf.layers.dense({ units: 20, activation: "sigmoid" }));
 
@@ -60,12 +56,12 @@ function convertToTensor(data) {
   return tf.tidy(() => {
     // Create raw inputs (xs) and labels (ys)
     let rawInputs = [];
-    for (let i = 0; i < data.length - 60 - 3; i++) {
+    for (let i = 0; i < data.length - INPUT_INTERVAL - 3; i++) {
       let input = {};
-      input.xs = data.slice(i, i + 60);
-      const lastPrice = data[i + 59].closePrice;
+      input.xs = data.slice(i, i + INPUT_INTERVAL);
+      const lastPrice = data[i + INPUT_INTERVAL - 1].closePrice;
       let higherPriceCount = 0;
-      for (let j = i + 60; j <= i + 60 + 3; j++) {
+      for (let j = i + INPUT_INTERVAL; j <= i + INPUT_INTERVAL + 3; j++) {
         if (data[j].closePrice > lastPrice) {
           higherPriceCount++;
         }
@@ -77,18 +73,70 @@ function convertToTensor(data) {
       }
       rawInputs.push(input);
     }
+    
+    let rawInputsTraining = rawInputs.slice(
+      0,
+      rawInputs.length * TRAINING_PERCENTAGE
+    );
+    let rawInputsTesting = rawInputs.slice(
+      rawInputs.length * TRAINING_PERCENTAGE,
+      rawInputs.length
+    );
 
-    // Step 1. Shuffle the data
-    // tf.util.shuffle(rawInputs);
-    // console.log("rawInputs shuffled: ", rawInputs);
-    // Can't shuffle sequential data!!!
-    // test samples would have very similar training samples
-    // take a % chunk for testing
-    // for time series:
-    // take last few % for testing, after that you can shuffle
+    tf.util.shuffle(rawInputsTraining);
+    console.log("Raw inputs: ", rawInputsTraining);
 
-    // Step 2. Convert data to Tensor and normalize the data to range 0 - 1
+    // Balancing
+    let num0 = 0;
+    let num1 = 0;
+    for (let i = 0; i < rawInputsTraining.length; i++) {
+      if (rawInputsTraining[i].ys == 0) num0++;
+      if (rawInputsTraining[i].ys == 1) num1++;
+    }
+    console.log("Broj nula: ", num0);
+    console.log("Broj jedinica: ", num1);
+    let diff = Math.abs(num0 - num1);
+    console.log("diff " + diff);
 
+    let k = 0;
+    while (diff > 0) {
+      if (num0 > num1) {
+        if (rawInputsTraining[k].ys == 0) {
+          rawInputsTraining.splice(k, 1);
+          console.log("brisem nulu");
+          diff--;
+          k--;
+        }
+      } else if (num1 > num0) {
+        if (rawInputsTraining[k].ys == 1) {
+          rawInputsTraining.splice(k, 1);
+          console.log("brisem jedinicu");
+          diff--;
+          k--;
+        }
+      }
+      k++;
+    }
+
+    num0 = 0;
+    num1 = 0;
+    for (let i = 0; i < rawInputsTraining.length; i++) {
+      if (rawInputsTraining[i].ys == 0) num0++;
+      if (rawInputsTraining[i].ys == 1) num1++;
+    }
+    console.log("Broj nula: ", num0);
+    console.log("Broj jedinica: ", num1);
+    diff = Math.abs(num0 - num1);
+    console.log("diff " + diff);
+    tf.util.shuffle(rawInputsTraining);
+
+    const percentageZeros = ((num0 * 100) / rawInputsTraining.length).toFixed(
+      2
+    );
+    console.log(percentageZeros + "% 0s");
+    console.log(100 - percentageZeros + "% 1s");
+
+    // Normalize the data to range 0 - 1
     let inputMin = {
       time: Number.MAX_SAFE_INTEGER,
       closePrice: Number.MAX_SAFE_INTEGER,
@@ -131,7 +179,7 @@ function convertToTensor(data) {
       quoteVolume: inputMax.quoteVolume - inputMin.quoteVolume,
     };
 
-    const inputs = rawInputs.map((d) => {
+    const inputsTraining = rawInputsTraining.map((d) => {
       return d.xs.map((x) => {
         return Object.values({
           time: (x.time - inputMin.time) / inputMinMaxDiff.time,
@@ -144,51 +192,50 @@ function convertToTensor(data) {
         });
       });
     });
-    const labels = rawInputs.map((d) => d.ys);
+    const labelsTraining = rawInputsTraining.map((d) => d.ys);
 
-    console.log("inputs: ", inputs);
-    console.log("labels: ", labels);
+    const inputsTesting = rawInputsTesting.map((d) => {
+      return d.xs.map((x) => {
+        return Object.values({
+          time: (x.time - inputMin.time) / inputMinMaxDiff.time,
+          closePrice:
+            (x.closePrice - inputMin.closePrice) / inputMinMaxDiff.closePrice,
+          volume: (x.volume - inputMin.volume) / inputMinMaxDiff.volume,
+          quoteVolume:
+            (x.quoteVolume - inputMin.quoteVolume) /
+            inputMinMaxDiff.quoteVolume,
+        });
+      });
+    });
+    const labelsTesting = rawInputsTesting.map((d) => d.ys);
 
-    // Balancing
-    let num0 = 0;
-    for (let i = 0; i < labels.length; i++) {
-      if (labels[i] == 0) num0++;
-    }
-    console.log("Broj nula: ", num0);
-    const percentageZeros = ((num0 * 100) / labels.length).toFixed(2);
-    console.log(percentageZeros + "% 0s");
-    console.log(100 - percentageZeros + "% 1s");
-    // it's 55% 1s and 45% 0s
-    // data is already balanced
+    console.log("inputs: ", inputsTraining);
+    console.log("labels: ", labelsTraining);
 
-    const trainingInputs = inputs.slice(0, inputs.length * 0.95);
-    const testInputs = inputs.slice(inputs.length * 0.95, inputs.length);
-    const trainingLabels = labels.slice(0, labels.length * 0.95);
-    const testLabels = labels.slice(labels.length * 0.95, labels.length);
-    console.log("training inputs length", trainingInputs.length);
-    console.log("test inputs length", testInputs.length);
-    console.log("training labels length", trainingLabels.length);
-    console.log("test labels length", testLabels.length);
+    console.log("training inputs length", inputsTraining.length);
+    console.log("test inputs length", inputsTesting.length);
+    console.log("training labels length", labelsTraining.length);
+    console.log("test labels length", labelsTesting.length);
 
-    const trainingInputsTensor = tf.tensor3d(trainingInputs, [
-      trainingInputs.length,
-      60,
+    const trainingInputsTensor = tf.tensor3d(inputsTraining, [
+      inputsTraining.length,
+      INPUT_INTERVAL,
       4,
     ]);
-    const trainingLabelsTensor = tf.tensor2d(trainingLabels, [
-      trainingLabels.length,
+    const trainingLabelsTensor = tf.tensor2d(labelsTraining, [
+      labelsTraining.length,
       1,
     ]);
-    const testInputsTensor = tf.tensor3d(testInputs, [
-      testInputs.length,
-      60,
+    const testInputsTensor = tf.tensor3d(inputsTesting, [
+      inputsTesting.length,
+      INPUT_INTERVAL,
       4,
     ]);
 
-    const testLabelsTensor = tf.tensor2d(testLabels, [testLabels.length, 1]);
-
-    console.log("training inputs: ", trainingInputsTensor);
-    console.log("test inputs: ", testInputsTensor);
+    const testLabelsTensor = tf.tensor2d(labelsTesting, [
+      labelsTesting.length,
+      1,
+    ]);
 
     return {
       trainingInputsTensor,
@@ -207,24 +254,16 @@ async function trainModel(
   testLabels
 ) {
   // Prepare the model for training.
-  const learningRate = 0.01;
-  const learningRate2 = 0.05;
-  const decayRate = 0.001;
   model.compile({
-    optimizer: tf.train.adam(learningRate),
-    // optimizer: tf.train.adam(learningRate2, decayRate),
+    optimizer: tf.train.adam(LEARNING_RATE),
+    // optimizer: tf.train.adam(LEARNING_RATE2, DECAY_RATE),
     loss: tf.losses.meanSquaredError,
     metrics: ["accuracy"],
   });
 
-  //   890 inputs
-  //   1, 2, 5, 10, 89, 178, 445, 890
-  const batchSize = 10;
-  const epochs = 150;
-
   return await model.fit(trainingInputs, trainingLabels, {
-    batchSize,
-    epochs,
+    batchSize: BATCH_SIZE,
+    epochs: EPOCHS,
     validationData: [testInputs, testLabels],
     shuffle: true,
     callbacks: tfvis.show.fitCallbacks(
@@ -233,6 +272,14 @@ async function trainModel(
       { height: 200, callbacks: ["onEpochEnd"] }
     ),
   });
+}
+
+function makePrediction(model, x, y) {
+  console.log("Prediction:");
+  console.log("x: " + x);
+  console.log("Correct answer: " + y);
+  const xTensor = tf.tensor3d(tf.util.flatten(x), [1, INPUT_INTERVAL, 4]);
+  console.log("Model prediction: " + model.predict(xTensor).arraySync()[0]);
 }
 
 async function run() {
@@ -284,6 +331,11 @@ async function run() {
     testLabelsTensor
   );
   console.log("Done Training.");
+  makePrediction(
+    model,
+    testInputsTensor.arraySync()[0],
+    testLabelsTensor.arraySync()[0]
+  );
 }
 
 document.addEventListener("DOMContentLoaded", run);

@@ -1,9 +1,9 @@
-const INPUT_INTERVAL = 15;
+const INPUT_INTERVAL = 20;
 const TRAINING_PERCENTAGE = 0.9;
 
 const LEARNING_RATE = 0.01;
-const LEARNING_RATE2 = 0.03;
-const DECAY_RATE = 0.002;
+const LEARNING_RATE2 = 0.003;
+const DECAY_RATE = 0.0004;
 const BATCH_SIZE = 10;
 const EPOCHS = 150;
 
@@ -26,19 +26,22 @@ function createModel() {
   const model = tf.sequential();
 
   // Add a single input layer
-  model.add(
-    tf.layers.lstm({
-      inputShape: [INPUT_INTERVAL, 4],
-      units: 40,
-      returnSequences: false,
-      activation: "tanh",
-    })
-  );
-  // model.add(tf.layers.flatten({ inputShape: [INPUT_INTERVAL, 4] }));
-
+  // model.add(
+  //   tf.layers.lstm({
+  //     inputShape: [INPUT_INTERVAL, 4],
+  //     units: 40,
+  //     returnSequences: false,
+  //     activation: "tanh",
+  //   })
+  // );
+  model.add(tf.layers.flatten({ inputShape: [INPUT_INTERVAL, 4] }));
+  
   model.add(tf.layers.dense({ units: 40, activation: "sigmoid" }));
+  model.add(tf.layers.dropout(0.2));
   model.add(tf.layers.dense({ units: 40, activation: "sigmoid" }));
+  model.add(tf.layers.dropout(0.2));
   model.add(tf.layers.dense({ units: 20, activation: "sigmoid" }));
+  model.add(tf.layers.dropout(0.2));
 
   // Add an output layer
   model.add(tf.layers.dense({ units: 1 }));
@@ -255,8 +258,8 @@ async function trainModel(
 ) {
   // Prepare the model for training.
   model.compile({
-    optimizer: tf.train.adam(LEARNING_RATE),
-    // optimizer: tf.train.adam(LEARNING_RATE2, DECAY_RATE),
+    // optimizer: tf.train.adam(LEARNING_RATE),
+    optimizer: tf.train.adam(LEARNING_RATE2, DECAY_RATE),
     loss: tf.losses.meanSquaredError,
     metrics: ["accuracy"],
   });
